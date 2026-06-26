@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * PetDex Sidecar — a minimal HTTP server that:
- *   - Listens on 127.0.0.1:9120 for POST /state, POST /bubble, GET /state, GET /bubble
- *   - Writes state to ~/.petdex/runtime/state.json and bubble.json
+ *   - Listens on 127.0.0.1:7777 for POST /state, POST /bubble, GET /state, GET /bubble
+ *   - Writes state to ~/petdex/runtime/state.json and bubble.json
  *   - Exposes these files so the Tauri WebView can poll them
 
  * Protocol:
@@ -19,7 +19,7 @@ const path = require("path");
 
 const { startActivityMonitor } = require("./activity-monitor");
 
-const RUNTIME_DIR = process.env.RUNTIME_DIR || path.join(process.env.HOME || "/tmp", ".petdex/runtime");
+const RUNTIME_DIR = process.env.RUNTIME_DIR || path.join(process.env.HOME || "/tmp", "petdex", "runtime");
 
 // Ensure runtime directory exists
 function ensureRuntimeDir() {
