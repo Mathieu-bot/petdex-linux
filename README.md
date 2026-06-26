@@ -211,7 +211,9 @@ petdex-linux/
 │   ├── src/main.rs                 # Entry point
 │   └── tauri.conf.json             # Frameless, transparent, always-on-top
 ├── ui/
-│   └── index.html                  # RAF animation engine (CSS + JS)
+│   ├── index.html                  # HTML structure
+│   ├── style.css                   # Styling
+│   └── pet.js                      # RAF animation engine + API polling
 ├── sidecar/
 │   ├── server.js                   # HTTP API server (port 7777)
 │   └── activity-monitor.js         # xdotool window watcher
