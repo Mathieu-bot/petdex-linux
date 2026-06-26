@@ -13,7 +13,7 @@ const PET_STATES = {
 
 const FRAME_W = 192;
 const FRAME_H = 208;
-const LOOP_MS = 1100; // single loop duration for all states
+const LOOP_MS = 1100;
 const DEFAULT_STATE = "idle";
 
 // ── Animation state ──
@@ -30,17 +30,21 @@ let rafId = 0;
 let lastStateCounter = 0;
 let lastBubbleCounter = 0;
 
-// ── Sprite element reference ──
+// ── Pet selector state ──
+let allPets = [];
+let currentPetSlug = null;
+
+// ── DOM refs ──
 const sprite = document.getElementById("sprite");
+const selectorBtn = document.getElementById("pet-selector-btn");
+const selectorDropdown = document.getElementById("pet-selector-dropdown");
 
 // ── RAF animation loop ──
-// Only redraws when the visible cell changes (skips ~90% of ticks)
 function animationLoop(now) {
   const s = PET_STATES[currentState] || PET_STATES[DEFAULT_STATE];
   const row = s.row;
   const count = s.frames;
 
-  // Detect state transition: new row or frame count
   if (row !== activeRow || count !== activeCount) {
     activeRow = row;
     activeCount = count;
@@ -49,14 +53,12 @@ function animationLoop(now) {
     drawnFrame = -1;
   }
 
-  // Timing: LOOP_MS / frameCount = ms per frame step
   const stepMs = LOOP_MS / count;
   if (now - lastStep >= stepMs) {
     frame = (frame + 1) % count;
     lastStep = now;
   }
 
-  // Only paint when the cell actually changed
   if (frame !== drawnFrame || row !== drawnRow) {
     const x = frame * -FRAME_W;
     const y = row * -FRAME_H;
@@ -72,8 +74,6 @@ function animationLoop(now) {
 function startAnimation(stateId) {
   const s = PET_STATES[stateId] || PET_STATES[DEFAULT_STATE];
   currentState = stateId;
-
-  // Reset so the RAF loop picks up the new row/count
   activeRow = -1;
   activeCount = -1;
   frame = 0;
@@ -89,8 +89,78 @@ function applyState(stateId) {
     "running": "running", "waving": "waving", "jumping": "jumping",
   };
   const resolved = ALIASES[stateId] || stateId;
-  if (!PET_STATES[resolved]) return; // unknown state
+  if (!PET_STATES[resolved]) return;
   startAnimation(resolved);
+}
+
+// ── Pet sprite loading ──
+async function loadPetSprite(pet) {
+  if (!pet) return;
+  currentPetSlug = pet.slug;
+
+  const b64 = await window.__TAURI_INTERNALS__.invoke("read_file_as_base64", { path: pet.sprite_path });
+  const ext = pet.sprite_path.endsWith(".png") ? "png" : "webp";
+  sprite.style.backgroundImage = `url("data:image/${ext};base64,${b64}")`;
+
+  await new Promise((resolve) => {
+    const img = new Image();
+    img.onload = resolve;
+    img.onerror = resolve;
+    img.src = `data:image/${ext};base64,${b64}`;
+  });
+
+  applyState(DEFAULT_STATE);
+}
+
+// ── Pet selector ──
+async function loadPetList() {
+  try {
+    allPets = await window.__TAURI_INTERNALS__.invoke("list_pets");
+    buildSelectorDropdown();
+  } catch (e) {
+    // No pets or listing failed
+    allPets = [];
+  }
+}
+
+function buildSelectorDropdown() {
+  selectorDropdown.innerHTML = "";
+  if (allPets.length === 0) return;
+
+  allPets.forEach((pet) => {
+    const item = document.createElement("button");
+    item.className = "pet-selector-item";
+    item.textContent = pet.name;
+    item.dataset.slug = pet.slug;
+    if (pet.slug === currentPetSlug) {
+      item.classList.add("active");
+    }
+    item.addEventListener("click", () => switchPet(pet.slug));
+    selectorDropdown.appendChild(item);
+  });
+}
+
+async function switchPet(slug) {
+  if (slug === currentPetSlug) {
+    toggleSelector(false);
+    return;
+  }
+  try {
+    await window.__TAURI_INTERNALS__.invoke("select_pet", { slug });
+    const pet = await window.__TAURI_INTERNALS__.invoke("get_active_pet");
+    await loadPetSprite(pet);
+    buildSelectorDropdown();
+  } catch (e) {
+    console.error("switch pet:", e);
+  }
+  toggleSelector(false);
+}
+
+function toggleSelector(show) {
+  const isVisible = !selectorDropdown.classList.contains("hidden");
+  const shouldShow = show !== undefined ? show : !isVisible;
+  selectorDropdown.classList.toggle("hidden", !shouldShow);
+  selectorBtn.classList.toggle("open", shouldShow);
 }
 
 // ── Sidecar polling ──
@@ -140,6 +210,8 @@ function showBubble(text) {
 // ── Dragging ──
 document.getElementById("root").addEventListener("mousedown", async (e) => {
   if (e.button !== 0) return;
+  // Don't drag when clicking the selector
+  if (e.target.closest("#pet-selector")) return;
   try {
     await window.__TAURI_INTERNALS__.invoke("start_window_drag");
   } catch (err) {
@@ -158,25 +230,27 @@ window.addEventListener("contextmenu", async (e) => {
   }
 });
 
+// ── Pet selector toggle ──
+selectorBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleSelector();
+});
+
+// Close selector when clicking outside
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#pet-selector")) {
+    toggleSelector(false);
+  }
+});
+
 // ── Boot ──
 (async function boot() {
   try {
     const pet = await window.__TAURI_INTERNALS__.invoke("get_active_pet");
     if (!pet) return;
 
-    const b64 = await window.__TAURI_INTERNALS__.invoke("read_file_as_base64", { path: pet.sprite_path });
-    const ext = pet.sprite_path.endsWith(".png") ? "png" : "webp";
-    sprite.style.backgroundImage = `url("data:image/${ext};base64,${b64}")`;
-
-    // Wait for the spritesheet to decode before starting the RAF loop
-    await new Promise((resolve) => {
-      const img = new Image();
-      img.onload = resolve;
-      img.onerror = resolve;
-      img.src = `data:image/${ext};base64,${b64}`;
-    });
-
-    applyState(DEFAULT_STATE);
+    await loadPetSprite(pet);
+    await loadPetList();
 
     // Start RAF animation loop
     rafId = requestAnimationFrame(animationLoop);
