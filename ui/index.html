@@ -77,32 +77,21 @@
 
     const FRAME_W = 192;
     const FRAME_H = 208;
-    const LOOP_MS = 1100; // Hermes single loop duration for all states
+    const LOOP_MS = 1100; // single loop duration for all states
 
     const DEFAULT_STATE = "idle";
-
-    // States to auto-cycle through for variety
-    const AUTO_CYCLE = ["waving", "waiting", "jumping", "running", "review", "failed"];
-    const AUTO_CYCLE_MS = 3000;
 
     let currentState = DEFAULT_STATE;
     let frame = 0;
     let activeRow = -1;
     let activeCount = -1;
+    let drawnFrame = -1;
+    let drawnRow = -1;
     let lastStep = 0;
     let rafId = 0;
-    let cycleTimer = null;
 
     let lastStateCounter = 0;
     let lastBubbleCounter = 0;
-
-    function setFrame(stateId, index) {
-      const s = PET_STATES[stateId] || PET_STATES[DEFAULT_STATE];
-      const x = index * -FRAME_W;
-      const y = s.row * -FRAME_H;
-      const sprite = document.getElementById("sprite");
-      sprite.style.backgroundPosition = `${x}px ${y}px`;
-    }
 
     function startAnimation(stateId) {
       const s = PET_STATES[stateId] || PET_STATES[DEFAULT_STATE];
@@ -115,33 +104,41 @@
       lastStep = 0;
     }
 
+    // Hermes-style RAF loop — only redraws when the visible cell changes
     function animationLoop(now) {
       const s = PET_STATES[currentState] || PET_STATES[DEFAULT_STATE];
       const row = s.row;
       const count = s.frames;
 
-      // React to row/count changes (state switch)
+      // Detect state transition: new row or frame count
       if (row !== activeRow || count !== activeCount) {
         activeRow = row;
         activeCount = count;
         frame = 0;
         lastStep = now;
-        setFrame(currentState, 0);
+        drawnFrame = -1;
       }
 
-      // Hermes timing: LOOP_MS / frameCount = ms per step
+      // Hermes timing: LOOP_MS / frameCount = ms per frame step
       const stepMs = LOOP_MS / count;
       if (now - lastStep >= stepMs) {
         frame = (frame + 1) % count;
         lastStep = now;
-        setFrame(currentState, frame);
+      }
+
+      // Only paint when the cell actually changed (skips ~90% of RAF ticks)
+      if (frame !== drawnFrame || row !== drawnRow) {
+        const x = frame * -FRAME_W;
+        const y = row * -FRAME_H;
+        sprite.style.backgroundPosition = `${x}px ${y}px`;
+        drawnFrame = frame;
+        drawnRow = row;
       }
 
       rafId = requestAnimationFrame(animationLoop);
     }
 
     function applyState(stateId) {
-      // Map Hermes state names to spritesheet rows
       const ALIASES = {
         "idle": "idle", "wave": "waving", "run": "running",
         "failed": "failed", "review": "review", "jump": "jumping",
@@ -154,19 +151,6 @@
       startAnimation(resolved);
     }
 
-    // Auto-cycle through states when sidecar isn't providing them
-    function startAutoCycle() {
-      let idx = 0;
-      cycleTimer = setInterval(() => {
-        idx = (idx + 1) % AUTO_CYCLE.length;
-        const next = AUTO_CYCLE[idx];
-        if (next !== currentState) {
-          applyState(next);
-        }
-      }, AUTO_CYCLE_MS);
-    }
-
-    // Polling
     function startPolling() {
       setInterval(pollState, 300);
       setInterval(pollBubble, 300);
@@ -218,16 +202,24 @@
 
         const b64 = await window.__TAURI_INTERNALS__.invoke("read_file_as_base64", { path: pet.sprite_path });
         const ext = pet.sprite_path.endsWith(".png") ? "png" : "webp";
-        document.getElementById("sprite").style.backgroundImage =
-          `url("data:image/${ext};base64,${b64}")`;
+        const sprite = document.getElementById("sprite");
+        sprite.style.backgroundImage = `url("data:image/${ext};base64,${b64}")`;
+
+        // Wait for the spritesheet to decode before starting the RAF loop
+        await new Promise((resolve) => {
+          const img = new Image();
+          img.onload = resolve;
+          img.onerror = resolve; // start anyway on error
+          img.src = `data:image/${ext};base64,${b64}`;
+        });
+
         applyState(DEFAULT_STATE);
 
-        // Start Hermes-style RAF animation loop
+        // Start Hermes-style RAF animation loop (only after sprite decoded)
         rafId = requestAnimationFrame(animationLoop);
 
-        // Start sidecar polling + auto state cycling
+        // Start sidecar polling
         startPolling();
-        startAutoCycle();
 
         // Try to boot the sidecar
         try {
