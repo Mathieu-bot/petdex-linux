@@ -17,6 +17,8 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
+const { startActivityMonitor } = require("./activity-monitor");
+
 const RUNTIME_DIR = process.env.RUNTIME_DIR || path.join(process.env.HOME || "/tmp", ".petdex/runtime");
 
 // Ensure runtime directory exists
@@ -136,4 +138,5 @@ writeSafe(path.join(RUNTIME_DIR, "bubble.json"), { text: "", timestamp: Date.now
 const PORT = 7777;
 server.listen(PORT, "127.0.0.1", () => {
   console.error(`petdex-sidecar listening on http://127.0.0.1:${PORT}`);
+  startActivityMonitor(writeSafe, RUNTIME_DIR);
 });
