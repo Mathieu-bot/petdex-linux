@@ -80,8 +80,9 @@
 
     const DEFAULT_STATE = "idle";
 
-    // States to auto-cycle through for variety
-    const AUTO_CYCLE = ["idle", "idle", "waving", "idle", "waiting", "jumping", "idle"];
+    // States to auto-cycle through for variety (faster, less idle time)
+    const AUTO_CYCLE = ["waving", "waiting", "jumping", "running", "review", "failed"];
+    const AUTO_CYCLE_MS = 3000;
 
     let currentState = DEFAULT_STATE;
     let frameIndex = 0;
@@ -121,7 +122,17 @@
     }
 
     function applyState(stateId) {
-      startAnimation(stateId);
+      // Map Hermes state names to spritesheet rows
+      const ALIASES = {
+        "idle": "idle", "wave": "waving", "run": "running",
+        "failed": "failed", "review": "review", "jump": "jumping",
+        "waiting": "waiting", "running-left": "running-left",
+        "running-right": "running-right", "done": "waving",
+        "running": "running", "waving": "waving", "jumping": "jumping",
+      };
+      const resolved = ALIASES[stateId] || stateId;
+      if (!PET_STATES[resolved]) return; // unknown state
+      startAnimation(resolved);
     }
 
     // Auto-cycle through states when sidecar isn't providing them
@@ -133,7 +144,7 @@
         if (next !== currentState) {
           applyState(next);
         }
-      }, 4000);
+      }, AUTO_CYCLE_MS);
     }
 
     // Polling
@@ -148,7 +159,11 @@
         if (!data) return;
         if (data.counter === lastStateCounter) return;
         lastStateCounter = data.counter;
-        applyState(data.state || DEFAULT_STATE);
+        // Only change animation when the state actually differs, so the
+        // auto-cycle isn't overridden by the sidecar's idle default.
+        if (data.state && data.state !== currentState) {
+          applyState(data.state);
+        }
       } catch (e) {
         // ignore
       }
