@@ -56,7 +56,7 @@ const WINDOW_STATE_MAP = [
       "firefox", "chrome", "brave", "chromium", "edge",
       "opera", "browser", " - google search", " - duckduckgo",
     ],
-    state: "review",
+    state: "waiting",
   },
   // Priority 5: system settings / config
   {
@@ -65,7 +65,7 @@ const WINDOW_STATE_MAP = [
       "update", "preferences", "configuration",
       "installer", "setup", "property",
     ],
-    state: "waiting",
+    state: "review",
   },
   // Priority 6: file management
   {

@@ -15,19 +15,46 @@ if ! command -v node &>/dev/null; then
     exit 1
 fi
 
+if ! command -v xdotool &>/dev/null; then
+    echo "Warning: xdotool not found — activity monitor won't work."
+    echo "  Debian/Ubuntu: sudo apt install xdotool"
+    echo "  Arch:         sudo pacman -S xdotool"
+    echo "  Fedora:       sudo dnf install xdotool"
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 echo "Installing sidecar dependencies..."
-cd "$(dirname "$0")/sidecar"
+cd "$SCRIPT_DIR/sidecar"
 npm install
 
 echo "Building PetDex desktop app..."
-cd "$(dirname "$0")/src-tauri"
+cd "$SCRIPT_DIR/src-tauri"
 cargo build --release
 
+echo "Setting up runtime directories..."
+mkdir -p "$HOME/.petdex/pets"
+
+# Copy sidecar to runtime path (the compiled binary looks for it there)
+echo "Copying sidecar..."
+mkdir -p "$HOME/.petdex/sidecar"
+cp -r "$SCRIPT_DIR/sidecar"/*.js "$HOME/.petdex/sidecar/"
+cp "$SCRIPT_DIR/sidecar/package.json" "$HOME/.petdex/sidecar/"
+
 echo "Installing to ~/.local/bin..."
-mkdir -p ~/.local/bin
-ln -sf "$(pwd)/target/release/app" ~/.local/bin/petdex-desktop
+mkdir -p "$HOME/.local/bin"
+ln -sf "$SCRIPT_DIR/src-tauri/target/release/petdex-linux" "$HOME/.local/bin/petdex-desktop"
 
 echo ""
 echo "=== Done! ==="
-echo "Run 'petdex-desktop' to start the pet."
-echo "Add ~/.local/bin to your PATH if not already."
+echo ""
+echo "  Next steps:"
+echo "    1. Add a pet spritesheet:"
+echo "       mkdir -p ~/.petdex/pets/my-pet"
+echo "       # copy your spritesheet.webp and pet.json into it"
+echo ""
+echo "    2. Run the app:"
+echo "       petdex-desktop"
+echo ""
+echo "  Add ~/.local/bin to your PATH if not already."
+echo ""

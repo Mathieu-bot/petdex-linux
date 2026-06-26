@@ -9,7 +9,7 @@ ExecStart=%h/.local/bin/petdex-desktop
 Restart=on-failure
 RestartSec=5
 Environment=DISPLAY=:0
-Environment=WAYLAND_DISPLAY=wayland-0
+Environment=RUNTIME_DIR=%h/petdex/runtime
 
 [Install]
 WantedBy=graphical-session.target

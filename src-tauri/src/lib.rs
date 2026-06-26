@@ -9,8 +9,6 @@ const RUNTIME_DIR: &str = "petdex/runtime";
 
 /// Where pets are stored
 const PET_DIRS: &[&str] = &[
-    ".hermes/pets",
-    ".codex/pets",
     ".petdex/pets",
 ];
 
