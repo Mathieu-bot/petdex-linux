@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>PetDex</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      background: transparent;
+      width: 192px;
+      height: 288px;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #root {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 192px;
+      height: 208px;
+      cursor: grab;
+    }
+    #root:active { cursor: grabbing; }
+
+    #sprite {
+      width: 192px;
+      height: 208px;
+      background-repeat: no-repeat;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    /* Bubble styling */
+    #bubble {
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255, 255, 255, 0.93);
+      color: #111;
+      font: 11px/1.4 system-ui, sans-serif;
+      padding: 6px 10px;
+      border-radius: 8px;
+      max-width: 180px;
+      word-wrap: break-word;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+      opacity: 0;
+      transition: opacity 0.25s ease;
+      pointer-events: none;
+      white-space: pre-wrap;
+    }
+    #bubble.visible { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div id="bubble"></div>
+    <div id="sprite" role="img" aria-label="PetDex pet"></div>
+  </div>
+
+  <script>
+    // Pet state definitions
+    const PET_STATES = {
+      "idle":          { row: 0, frames: 6, durationMs: 1100 },
+      "running-right": { row: 1, frames: 8, durationMs: 1060 },
+      "running-left":  { row: 2, frames: 8, durationMs: 1060 },
+      "waving":        { row: 3, frames: 4, durationMs:  700 },
+      "jumping":       { row: 4, frames: 5, durationMs:  840 },
+      "failed":        { row: 5, frames: 8, durationMs: 1220 },
+      "waiting":       { row: 6, frames: 6, durationMs: 1010 },
+      "running":       { row: 7, frames: 6, durationMs:  820 },
+      "review":        { row: 8, frames: 6, durationMs: 1030 },
+    };
+
+    const FRAME_W = 192;
+    const FRAME_H = 208;
+
+    const DEFAULT_STATE = "idle";
+
+    // States to auto-cycle through for variety
+    const AUTO_CYCLE = ["idle", "idle", "waving", "idle", "waiting", "jumping", "idle"];
+
+    let currentState = DEFAULT_STATE;
+    let frameIndex = 0;
+    let frameTimer = null;
+    let cycleTimer = null;
+
+    let lastStateCounter = 0;
+    let lastBubbleCounter = 0;
+
+    function setFrame(stateId, index) {
+      const s = PET_STATES[stateId] || PET_STATES[DEFAULT_STATE];
+      const x = index * -FRAME_W;
+      const y = s.row * -FRAME_H;
+      const sprite = document.getElementById("sprite");
+      sprite.style.backgroundPosition = `${x}px ${y}px`;
+    }
+
+    function startAnimation(stateId) {
+      if (frameTimer) {
+        clearInterval(frameTimer);
+        frameTimer = null;
+      }
+
+      const s = PET_STATES[stateId] || PET_STATES[DEFAULT_STATE];
+      currentState = stateId;
+
+      // Show first frame immediately
+      frameIndex = 0;
+      setFrame(stateId, 0);
+
+      // Advance frames on a timer
+      const msPerFrame = s.durationMs / s.frames;
+      frameTimer = setInterval(() => {
+        frameIndex = (frameIndex + 1) % s.frames;
+        setFrame(stateId, frameIndex);
+      }, msPerFrame);
+    }
+
+    function applyState(stateId) {
+      startAnimation(stateId);
+    }
+
+    // Auto-cycle through states when sidecar isn't providing them
+    function startAutoCycle() {
+      let idx = 0;
+      cycleTimer = setInterval(() => {
+        idx = (idx + 1) % AUTO_CYCLE.length;
+        const next = AUTO_CYCLE[idx];
+        if (next !== currentState) {
+          applyState(next);
+        }
+      }, 4000);
+    }
+
+    // Polling
+    function startPolling() {
+      setInterval(pollState, 300);
+      setInterval(pollBubble, 300);
+    }
+
+    async function pollState() {
+      try {
+        const data = await window.__TAURI_INTERNALS__.invoke("read_runtime_state");
+        if (!data) return;
+        if (data.counter === lastStateCounter) return;
+        lastStateCounter = data.counter;
+        applyState(data.state || DEFAULT_STATE);
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    async function pollBubble() {
+      try {
+        const data = await window.__TAURI_INTERNALS__.invoke("read_runtime_bubble");
+        if (!data) return;
+        if (data.counter === lastBubbleCounter) return;
+        lastBubbleCounter = data.counter;
+        showBubble(data.text || "");
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    function showBubble(text) {
+      const el = document.getElementById("bubble");
+      if (!text) {
+        el.textContent = "";
+        el.classList.remove("visible");
+        return;
+      }
+      el.textContent = text;
+      el.classList.add("visible");
+    }
+
+    async function boot() {
+      try {
+        const pet = await window.__TAURI_INTERNALS__.invoke("get_active_pet");
+        if (!pet) return;
+
+        const b64 = await window.__TAURI_INTERNALS__.invoke("read_file_as_base64", { path: pet.sprite_path });
+        const ext = pet.sprite_path.endsWith(".png") ? "png" : "webp";
+        document.getElementById("sprite").style.backgroundImage =
+          `url("data:image/${ext};base64,${b64}")`;
+        applyState(DEFAULT_STATE);
+
+        // Start sidecar polling + auto state cycling
+        startPolling();
+        startAutoCycle();
+
+        // Try to boot the sidecar
+        try {
+          await window.__TAURI_INTERNALS__.invoke("spawn_sidecar");
+        } catch (e) {
+          // sidecar not needed for standalone mode
+        }
+      } catch (e) {
+        // silent fail — window stays transparent
+      }
+    }
+
+    // Dragging via custom Rust command
+    document.getElementById("root").addEventListener("mousedown", async (e) => {
+      if (e.button !== 0) return;
+      try {
+        await window.__TAURI_INTERNALS__.invoke("start_window_drag");
+      } catch (err) {
+        // ignore
+      }
+    });
+
+    // Right-click to quit
+    window.addEventListener("contextmenu", async (e) => {
+      e.preventDefault();
+      try {
+        await window.__TAURI_INTERNALS__.invoke("stop_sidecar");
+        await window.__TAURI_INTERNALS__.invoke("quit_app");
+      } catch (err) {
+        console.error("quit:", err);
+      }
+    });
+
+    boot();
+  </script>
+</body>
+</html>
