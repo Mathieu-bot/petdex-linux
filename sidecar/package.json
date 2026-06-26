@@ -1,0 +1,6 @@
+{
+  "name": "petdex-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PetDex sidecar — HTTP server that drives pet animations via runtime files"
+}
