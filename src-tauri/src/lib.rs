@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -31,6 +31,12 @@ pub struct BubbleData {
     pub counter: u64,
 }
 
+/// Pet selected in active.json (written by `npx petdex select` or our select_pet)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ActivePet {
+    pub slug: String,
+}
+
 pub struct SidecarState {
     pub child: Mutex<Option<std::process::Child>>,
 }
@@ -47,59 +53,124 @@ fn home_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("/tmp"))
 }
 
-/// Scan pet directories for available pets, return the first one found
+/// Find a pet by slug across all PET_DIRS
+fn find_pet_by_slug(home: &PathBuf, slug: &str) -> Option<PetInfo> {
+    for dir_rel in PET_DIRS {
+        let pet_dir = home.join(dir_rel).join(slug);
+        if !pet_dir.is_dir() {
+            continue;
+        }
+        let pet_json_path = pet_dir.join("pet.json");
+        if !pet_json_path.exists() {
+            continue;
+        }
+        for ext in &["spritesheet.webp", "spritesheet.png"] {
+            let sprite_path = pet_dir.join(ext);
+            if sprite_path.exists() {
+                if let Ok(content) = fs::read_to_string(&pet_json_path) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(dn) = json.get("displayName").and_then(|v| v.as_str()) {
+                            return Some(PetInfo {
+                                name: dn.to_string(),
+                                slug: slug.to_string(),
+                                sprite_path: sprite_path.to_string_lossy().to_string(),
+                            });
+                        }
+                    }
+                }
+                return Some(PetInfo {
+                    name: slug.to_string(),
+                    slug: slug.to_string(),
+                    sprite_path: sprite_path.to_string_lossy().to_string(),
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Get the currently active pet — checks active.json first, falls back to first found
 #[tauri::command]
 fn get_active_pet() -> Result<PetInfo, String> {
     let home = home_dir();
 
+    // 1. Try active.json (written by `npx petdex select` or our select_pet)
+    let active_path = home.join(".petdex").join("active.json");
+    if active_path.exists() {
+        if let Ok(content) = fs::read_to_string(&active_path) {
+            if let Ok(active) = serde_json::from_str::<ActivePet>(&content) {
+                if let Some(pet) = find_pet_by_slug(&home, &active.slug) {
+                    return Ok(pet);
+                }
+            }
+        }
+    }
+
+    // 2. Fall back to first valid pet in PET_DIRS order
     for dir_rel in PET_DIRS {
         let pets_dir = home.join(dir_rel);
         if !pets_dir.exists() {
             continue;
         }
-
-        let entries = fs::read_dir(&pets_dir).map_err(|e| format!("read_dir error: {e}"))?;
-        for entry in entries {
-            let entry = entry.map_err(|e| format!("entry error: {e}"))?;
-            let slug = entry.file_name();
-            let pet_dir = entry.path();
-            if !pet_dir.is_dir() {
-                continue;
-            }
-
-            let pet_json_path = pet_dir.join("pet.json");
-            if !pet_json_path.exists() {
-                continue;
-            }
-
-            // Try to find spritesheet
-            for ext in &["spritesheet.webp", "spritesheet.png"] {
-                let sprite_path = pet_dir.join(ext);
-                if sprite_path.exists() {
-                    // Read display name from pet.json
-                    let name = slug.to_string_lossy().to_string();
-                    if let Ok(content) = fs::read_to_string(&pet_json_path) {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                            if let Some(dn) = json.get("displayName").and_then(|v| v.as_str()) {
-                                return Ok(PetInfo {
-                                    name: dn.to_string(),
-                                    slug: slug.to_string_lossy().to_string(),
-                                    sprite_path: sprite_path.to_string_lossy().to_string(),
-                                });
-                            }
-                        }
-                    }
-                    return Ok(PetInfo {
-                        name,
-                        slug: slug.to_string_lossy().to_string(),
-                        sprite_path: sprite_path.to_string_lossy().to_string(),
-                    });
+        if let Ok(entries) = fs::read_dir(&pets_dir) {
+            for entry in entries.flatten() {
+                let slug = entry.file_name().to_string_lossy().to_string();
+                if let Some(pet) = find_pet_by_slug(&home, &slug) {
+                    return Ok(pet);
                 }
             }
         }
     }
 
     Err("no pet found".to_string())
+}
+
+/// List all installed pets
+#[tauri::command]
+fn list_pets() -> Result<Vec<PetInfo>, String> {
+    let home = home_dir();
+    let mut pets = Vec::new();
+
+    for dir_rel in PET_DIRS {
+        let pets_dir = home.join(dir_rel);
+        if !pets_dir.exists() {
+            continue;
+        }
+        if let Ok(entries) = fs::read_dir(&pets_dir) {
+            for entry in entries.flatten() {
+                let slug = entry.file_name().to_string_lossy().to_string();
+                if let Some(pet) = find_pet_by_slug(&home, &slug) {
+                    pets.push(pet);
+                }
+            }
+        }
+    }
+
+    if pets.is_empty() {
+        return Err("no pets found".to_string());
+    }
+    Ok(pets)
+}
+
+/// Select a pet by slug — writes active.json so it persists across restarts
+#[tauri::command]
+fn select_pet(slug: String) -> Result<(), String> {
+    let home = home_dir();
+
+    // Verify the pet exists before writing
+    if find_pet_by_slug(&home, &slug).is_none() {
+        return Err(format!("pet '{slug}' not found"));
+    }
+
+    let active_path = home.join(".petdex").join("active.json");
+    if let Some(parent) = active_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create_dir error: {e}"))?;
+    }
+
+    let content = serde_json::json!({ "slug": slug }).to_string() + "\n";
+    fs::write(&active_path, content).map_err(|e| format!("write error: {e}"))?;
+
+    Ok(())
 }
 
 /// Read a file and return its contents as a base64-encoded string
@@ -254,6 +325,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_active_pet,
+            list_pets,
+            select_pet,
             read_file_as_base64,
             spawn_sidecar,
             stop_sidecar,
