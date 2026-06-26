@@ -1,0 +1,15 @@
+# Rust
+src-tauri/target/
+src-tauri/tmp/
+
+# Node
+sidecar/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+*.o
+*.so
+*.dylib
