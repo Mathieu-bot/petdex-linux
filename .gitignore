@@ -13,3 +13,6 @@ Thumbs.db
 *.o
 *.so
 *.dylib
+
+# Internal planning files (not part of the app)
+.hermes/
