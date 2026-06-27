@@ -30,8 +30,8 @@ const WINDOW_STATE_MAP = [
   // Priority 2: coding / working
   {
     keywords: [
-      "vscode", "visual studio code", "code - ", "code - oss",
-      "vim", "nvim", "neovim", "emacs", "intellij", "pycharm",
+      "vscode", "visual studio code", "code - ", "code - oss", "project",
+      "vim", "nvim", "neovim", "emacs", "intellij", "pycharm", "gradle",
       "sublime", "atom", "zed", "helix",
       "terminal", "bash", "zsh", "fish",
       "building", "compil", "make", "makefile",
